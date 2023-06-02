@@ -1,0 +1,775 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this
+# software and associated documentation files (the "Software"), to deal in the Software
+# without restriction, including without limitation the rights to use, copy, modify,
+# merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+# permit persons to whom the Software is furnished to do so.
+ 
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+# PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+# HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+# SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Deploy Wickr Enterprise HA across three availability zones in your default region. This also includes an EC2 jump-box with the necessary tools pre-installed.
+
+
+Parameters:
+  LatestAmiId:
+    Type:  'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  SSHKeyName:
+    Type: String
+    Description: Name of the EC2 Key Pair for SSH access
+  sourceIP:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: The public IP range that you want to allow access from (most likely set to 0.0.0.0/0 to allow all access)
+  
+
+Resources:
+  VPC:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: "10.0.0.0/16"
+      EnableDnsSupport: 'true'
+      EnableDnsHostnames: 'true'
+      Tags:
+        - Key: Name
+          Value: wickr-ha
+
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    Properties:
+      Tags:
+        - Key: Name
+          Value: wickr-ha
+
+  VPCGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.0.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: wickr-ha-public1
+
+  PublicSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.1.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}b
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: wickr-ha-public2
+
+  PublicSubnet3:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.2.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}c
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: wickr-ha-public3
+
+  PrivateSubnet1:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.3.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}a
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private1
+
+  PrivateSubnet2:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.4.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}b
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private2
+
+  PrivateSubnet3:
+    Type: "AWS::EC2::Subnet"
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: "10.0.5.0/24"
+      AvailabilityZone: !Sub ${AWS::Region}c
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private3
+
+  NatGatewayEIP1:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+        - Key: Name
+          Value: wickr-ha-nat-eip1
+
+  NatGatewayEIP2:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+        - Key: Name
+          Value: wickr-ha-nat-eip2
+    
+  NatGatewayEIP3:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+        - Key: Name
+          Value: wickr-ha-nat-eip3
+
+  NatGateway1:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      AllocationId: !GetAtt NatGatewayEIP1.AllocationId
+
+  NatGateway2:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      AllocationId: !GetAtt NatGatewayEIP2.AllocationId
+
+  NatGateway3:
+    Type: "AWS::EC2::NatGateway"
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      AllocationId: !GetAtt NatGatewayEIP3.AllocationId
+
+  RouteTablePublic:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: wickr-ha-public-rt
+
+  PublicRoute:
+    Type: "AWS::EC2::Route"
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTablePublic
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociationPublic1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet1
+      RouteTableId: !Ref RouteTablePublic
+
+  SubnetRouteTableAssociationPublic2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet2
+      RouteTableId: !Ref RouteTablePublic
+
+  SubnetRouteTableAssociationPublic3:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PublicSubnet3
+      RouteTableId: !Ref RouteTablePublic
+
+  RouteTablePrivate1:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private-rt1
+
+  RouteTablePrivate2:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private-rt2
+
+  RouteTablePrivate3:
+    Type: "AWS::EC2::RouteTable"
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: wickr-ha-private-rt3
+
+  PrivateRoute1:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate1
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway1
+
+  PrivateRoute2:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate2
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway2
+
+  PrivateRoute3:
+    Type: "AWS::EC2::Route"
+    Properties:
+      RouteTableId: !Ref RouteTablePrivate3
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGateway3
+
+  SubnetRouteTableAssociationPrivate1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      RouteTableId: !Ref RouteTablePrivate1
+
+  SubnetRouteTableAssociationPrivate2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet2
+      RouteTableId: !Ref RouteTablePrivate2
+
+  SubnetRouteTableAssociationPrivate3:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    Properties:
+      SubnetId: !Ref PrivateSubnet3
+      RouteTableId: !Ref RouteTablePrivate3
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'jump-box egress only group'
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: "Jump box security group"
+
+  InstanceProfile: 
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles:
+        - !Ref InstanceRole
+
+  InstanceRole:
+    Type: 'AWS::IAM::Role'
+    Properties: 
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: instanceAssumeEKSAdmin
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "sts:AssumeRole"
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/EKSAdminRole"
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      SubnetId: !Ref PrivateSubnet1
+      SecurityGroupIds: 
+        - !GetAtt EC2SecurityGroup.GroupId
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref LatestAmiId
+      InstanceType: t2.small
+      KeyName: !Ref SSHKeyName
+      UserData:
+        Fn::Base64: |-
+          #!/bin/bash
+          yum update -y
+          curl https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o awscliv2.zip
+          unzip awscliv2.zip
+          sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
+          yum install jq -y
+          curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.24.13/2023-05-11/bin/linux/amd64/kubectl
+          chmod +x ./kubectl
+          mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH
+          kubectl version --short --client
+          curl https://kots.io/install/1.94.2 | sudo bash
+          kubectl-kots version
+          curl -sLO https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz
+          tar -xzf eksctl_Linux_amd64.tar.gz -C /tmp && rm eksctl_Linux_amd64.tar.gz
+          sudo mv /tmp/eksctl /usr/local/bin
+          cat > /usr/local/bin/configure-cluster.sh << __EOF__
+            #!/bin/bash
+            clear
+            EKS_NAME=wickr-ha
+            echo
+            echo
+            read -p "What region is your cluster deployed to? i.e us-east-1: " REGION
+            echo -e "NOTE: If any of the following commands fail, check you have assumed an Administrative role in the CLI by running: aws sts get-caller-identity"
+            sleep 1
+            ADMINARN=\$(aws --region \$REGION iam get-role --role-name EKSAdminRole | jq .Role.Arn | tr -d '"')
+            echo -e "Applying EKSAdminRole to the EKS cluster config"
+            eksctl create iamidentitymapping \
+                --cluster \$EKS_NAME \
+                --region \$REGION \
+                --arn \$ADMINARN \
+                --group system:masters \
+                --no-duplicate-arns \
+                --username EKSAdminRole
+            echo -e "Updating the EKS cluster config...."
+            aws eks update-kubeconfig --name \$EKS_NAME --region \$REGION
+            echo -e "...done!"
+            echo -e "Adding storage drivers to the cluster..."
+            eksctl utils associate-iam-oidc-provider --cluster wickr-ha --approve --region \$REGION
+            eksctl create iamserviceaccount --name ebs-csi-controller-sa --namespace kube-system --cluster wickr-ha --region \$REGION --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy --approve --role-only --role-name AmazonEKS_EBS_CSI_DriverRole
+            CSIROLE=\$(aws iam get-role --role-name AmazonEKS_EBS_CSI_DriverRole | jq .Role.Arn | tr -d '"')
+            eksctl create addon --name aws-ebs-csi-driver --cluster wickr-ha --region \$REGION --service-account-role-arn \$CSIROLE --force
+            echo -e "...done!"
+            echo
+            echo -e "Now run the following command, replacing LICENCE.YAML with your licence file: "
+            echo
+            echo -e "  kubectl kots install enterprise-ha --namespace wickr --ensure-rbac --license-file LICENCE.YAML"
+            echo
+          __EOF__
+          chmod +x /usr/local/bin/configure-cluster.sh
+
+      Tags:
+        - Key: Name
+          Value: jumpbox
+
+  DBSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: 'DB Security Group'
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - SourceSecurityGroupId: !GetAtt EKSCluster.ClusterSecurityGroupId
+          IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+      SecurityGroupEgress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: "-1"
+      Tags:
+        - Key: Name
+          Value: "Database security group"
+
+  DBCluster:
+    Type: "AWS::RDS::DBCluster"
+    DeletionPolicy: Delete
+    Properties:
+      Engine: aurora-mysql
+      DatabaseName: wickrdb
+      MasterUsername: admin
+      MasterUserPassword: !Join ['', ['{{resolve:secretsmanager:', !Ref RDSSecret, ':SecretString:password}}' ]]
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      StorageEncrypted: true
+      KmsKeyId: !Ref rdsKey
+      VpcSecurityGroupIds:
+        - !Ref DBSecurityGroup
+  DBInstance1:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      DBClusterIdentifier:
+        Ref: DBCluster
+      DBInstanceClass: db.r5.large
+      Engine: aurora-mysql
+      PubliclyAccessible: "false"
+  DBInstance2:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      DBClusterIdentifier:
+        Ref: DBCluster
+      DBInstanceClass: db.r5.large
+      Engine: aurora-mysql
+      PubliclyAccessible: "false"
+  DBInstance3:
+    Type: "AWS::RDS::DBInstance"
+    Properties:
+      DBClusterIdentifier:
+        Ref: DBCluster
+      DBInstanceClass: db.r5.large
+      Engine: aurora-mysql
+      PubliclyAccessible: "false"
+
+  DBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: "RDS Aurora MySQL Subnet Group"
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+        - !Ref PrivateSubnet3
+
+  RDSSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: 'This is the password for the Database Admin user'
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "admin"}'
+        GenerateStringKey: 'password'
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\'
+      KmsKeyId: !GetAtt SecretManagerKey.Arn
+  SecretManagerKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: true
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "*"
+            Resource: "*"
+  secretsManagerKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/secret
+      TargetKeyId:
+        Ref: SecretManagerKey
+
+  rdsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: true
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "*"
+            Resource: "*"
+  rdsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/rds
+      TargetKeyId:
+        Ref: rdsKey
+
+  S3Bucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub "wickr-${AWS::AccountId}-${AWS::Region}"
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucket
+        LogFilePrefix: wickr-ha
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: Only allow Secure Transport
+            Action:
+              - s3:*
+            Effect: Deny
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${S3Bucket}"
+              - !Sub "arn:${AWS::Partition}:s3:::${S3Bucket}/*"
+            Principal: "*"
+            Condition:
+              Bool:
+                aws:SecureTransport:
+                  false
+
+  LoggingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: GlacierRule
+            Status: Enabled
+            ExpirationInDays: 730
+            Transitions:
+              - TransitionInDays: 180
+                StorageClass: GLACIER
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: TRUE
+        BlockPublicPolicy: TRUE
+        IgnorePublicAcls: TRUE
+        RestrictPublicBuckets: TRUE
+  S3BucketPolicyLogging:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref LoggingBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: Only allow Secure Transport
+            Action:
+              - s3:*
+            Effect: Deny
+            Resource:
+              - !Sub "arn:${AWS::Partition}:s3:::${LoggingBucket}"
+              - !Sub "arn:${AWS::Partition}:s3:::${LoggingBucket}/*"
+            Principal: "*"
+            Condition:
+              Bool:
+                aws:SecureTransport:
+                  false
+
+
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: wickr-ha
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      Version: 1.23
+      ResourcesVpcConfig:
+        SubnetIds:
+          - !Ref "PrivateSubnet1"
+          - !Ref "PrivateSubnet2"
+          - !Ref "PrivateSubnet3"
+          - !Ref "PublicSubnet1"
+          - !Ref "PublicSubnet2"
+          - !Ref "PublicSubnet3"
+        EndpointPublicAccess: false
+        EndpointPrivateAccess: true
+      Logging:
+        ClusterLogging:
+          EnabledTypes:
+            - Type: api
+            - Type: audit
+            - Type: authenticator
+
+  externalToClusterRule1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: udp
+      FromPort: 16384
+      ToPort: 17384
+      CidrIp: !Ref sourceIP
+      GroupId: !GetAtt EKSCluster.ClusterSecurityGroupId
+
+  externalToClusterRule2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Ref sourceIP
+      GroupId: !GetAtt EKSCluster.ClusterSecurityGroupId
+
+  externalToClusterRule3:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 8001
+      ToPort: 8001
+      CidrIp: !Ref sourceIP
+      GroupId: !GetAtt EKSCluster.ClusterSecurityGroupId
+
+  jumpBoxToClusterRule:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      SourceSecurityGroupId: !GetAtt EC2SecurityGroup.GroupId
+      GroupId: !GetAtt EKSCluster.ClusterSecurityGroupId
+
+  Addon1:
+    Type: AWS::EKS::Addon
+    Properties: 
+      AddonName: vpc-cni
+      ClusterName: !Ref EKSCluster
+  Addon2:
+    Type: AWS::EKS::Addon
+    Properties: 
+      AddonName: coredns
+      ClusterName: !Ref EKSCluster
+  Addon3:
+    Type: AWS::EKS::Addon
+    Properties: 
+      AddonName: kube-proxy
+      ClusterName: !Ref EKSCluster
+
+  WorkerNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodegroupName: "worker-ng-01"
+      InstanceTypes:
+        - "m5.large"
+      ScalingConfig:
+        MinSize: 3
+        DesiredSize: 3
+        MaxSize: 6
+      Subnets:
+        - !Ref "PrivateSubnet1"
+        - !Ref "PrivateSubnet2"
+        - !Ref "PrivateSubnet3"
+      DiskSize: 50
+      NodeRole: !GetAtt EKSNodeRole.Arn
+
+  CallingNodeGroup:
+    Type: AWS::EKS::Nodegroup
+    Properties:
+      ClusterName: !Ref EKSCluster
+      NodegroupName: "calling-ng-01"
+      InstanceTypes:
+        - "m5.large"
+      ScalingConfig:
+        MinSize: 2
+        DesiredSize: 3
+        MaxSize: 6
+      Subnets:
+        - !Ref "PublicSubnet1"
+        - !Ref "PublicSubnet2"
+        - !Ref "PublicSubnet3"
+      DiskSize: 50
+      NodeRole: !GetAtt EKSNodeRole.Arn
+      Labels:
+        role: calling
+
+  EKSClusterRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: EKSClusterRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+
+  EKSNodeRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: EKSNodeRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+      Policies:
+        - PolicyName: s3Policy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:AbortMultipartUpload"
+                  - "s3:GetObjectVersion"
+                  - "s3:ListMultipartUploadParts"
+                Resource:
+                  - !Sub '${S3Bucket.Arn}/*'
+
+  EKSAdminRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: EKSAdminRole
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: EKSAdminPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "iam:GetRole"
+                  - "iam:ListRoles"
+                  - "iam:CreateServiceLinkedRole"
+                  - "iam:PassRole"
+                Resource: !GetAtt EKSClusterRole.Arn
+              - Effect: Allow
+                Action:
+                  - "eks:Create*"
+                  - "eks:Associate*"
+                  - "eks:RegisterCluster"
+                  - "eks:TagResource"
+                  - "eks:Update*"
+                  - "eks:Describe*"
+                  - "eks:List*"
+                  - "eks:AccessKubernetesApi"
+                Resource: !GetAtt EKSCluster.Arn
+
+Outputs:
+  EC2ID:
+    Description: The instance ID of the jump-box
+    Value: !Ref Instance
+  EKSAdminArn:
+    Description: The Arn of the EKS Admin role
+    Value: !GetAtt EKSAdminRole.Arn
+  S3BucketName:
+    Description: The name of the S3 bucket
+    Value: !Ref S3Bucket
+  DBAddress:
+    Description: The Database Endpoint value
+    Value: !GetAtt DBCluster.Endpoint.Address
