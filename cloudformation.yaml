@@ -552,6 +552,15 @@ Resources:
       PolicyDocument:
         Version: 2012-10-17
         Statement:
+          - Sid: Logging Policy
+            Effect: Allow
+            Action: 
+              - s3:PutObject
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Resource: 
+              - !Sub "arn:${AWS::Partition}:s3:::${LoggingBucket}/*"
+              - !Sub "arn:${AWS::Partition}:s3:::${LoggingBucket}"
           - Sid: Only allow Secure Transport
             Action:
               - s3:*
