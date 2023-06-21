@@ -18,7 +18,7 @@ This template and associated instructions will build a Wickr Enterprise High-Ava
 ## Requirements
 
 - An existing Amazon EC2 KeyPair uploaded or created in your AWS Account. Instructions can be found [here.](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html)
-- Administrative user/role with credentials for the AWS CLI that you are willing and able to use both locally and within the jump-box
+- [Administrative](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_job-functions.html#jf_administrator) user/role with credentials for the AWS CLI that you are willing and able to use both locally and within the jump-box
 - A valid Wickr Enterprise HA license key (.yaml format)
 - L200/300 Linux CLI knowledge and L100/200 AWS CLI knowledge
 - Cloned this repository locally and entered the repo directory
