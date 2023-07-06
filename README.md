@@ -11,7 +11,7 @@ This template and associated instructions will build a Wickr Enterprise High-Ava
 - 3 x Public and 3 x Private Subnets, with 3 x NAT Gateways spanning 3 Availability Zones in the given region
 - An Amazon Simple Storage Service (Amazon S3) bucket, encrypted with server-side encryption with Amazon S3 managed keys (SSE-S3) and access logging enabled
 - An Amazon Elastic Compute Cloud (Amazon EC2) instance running Amazon Linux 2 with necessary tools pre-installed, to be used as a jump-box for cluster administration via AWS Systems Manager Session Manager
-- An Amazon Elastic Kubernetes Service (Amazon EKS) cluster running EKS version 1.23
+- An Amazon Elastic Kubernetes Service (Amazon EKS) cluster running EKS version 1.26, with Kubernetes Secrets encrypted with an AWS Key Management Service (KMS) Customer Managed Key (CMK)
 - An Amazon Relational Database Service (Amazon RDS) running Amazon Aurora for MySQL, encrypted with an AWS Key Management Service (KMS) Customer Managed Key (CMK)
 - Amazon Aurora for MySQL admin user credential dynamically provisioned and stored in AWS Secrets Manager, secured with an AWS KMS CMK
 
