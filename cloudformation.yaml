@@ -289,7 +289,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
       Policies:
         - PolicyName: instanceAssumeEKSAdmin
           PolicyDocument:
@@ -298,7 +298,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - "sts:AssumeRole"
-                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/EKSAdminRole"
+                Resource: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/EKSAdminRole"
 
   Instance:
     Type: AWS::EC2::Instance
@@ -318,11 +318,11 @@ Resources:
           unzip awscliv2.zip
           sudo ./aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli --update
           yum install jq -y
-          curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.24.13/2023-05-11/bin/linux/amd64/kubectl
+          curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.26.4/2023-05-11/bin/linux/amd64/kubectl
           chmod +x ./kubectl
           mkdir -p $HOME/bin && cp ./kubectl $HOME/bin/kubectl && export PATH=$HOME/bin:$PATH
           kubectl version --short --client
-          curl https://kots.io/install/1.94.2 | sudo bash
+          curl https://kots.io/install | bash
           kubectl-kots version
           curl -sLO https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_amd64.tar.gz
           tar -xzf eksctl_Linux_amd64.tar.gz -C /tmp && rm eksctl_Linux_amd64.tar.gz
@@ -334,6 +334,12 @@ Resources:
             echo
             echo
             read -p "What region is your cluster deployed to? i.e us-east-1: " REGION
+            if [[ $REGION == us-gov-* ]]
+              then
+                PARTITION=$REGION
+              else
+                PARTITION=aws
+            fi
             echo -e "NOTE: If any of the following commands fail, check you have assumed an Administrative role in the CLI by running: aws sts get-caller-identity"
             sleep 1
             ADMINARN=\$(aws --region \$REGION iam get-role --role-name EKSAdminRole | jq .Role.Arn | tr -d '"')
@@ -350,7 +356,7 @@ Resources:
             echo -e "...done!"
             echo -e "Adding storage drivers to the cluster..."
             eksctl utils associate-iam-oidc-provider --cluster wickr-ha --approve --region \$REGION
-            eksctl create iamserviceaccount --name ebs-csi-controller-sa --namespace kube-system --cluster wickr-ha --region \$REGION --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy --approve --role-only --role-name AmazonEKS_EBS_CSI_DriverRole
+            eksctl create iamserviceaccount --name ebs-csi-controller-sa --namespace kube-system --cluster wickr-ha --region \$REGION --attach-policy-arn arn:\$PARTITION:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy --approve --role-only --role-name AmazonEKS_EBS_CSI_DriverRole
             CSIROLE=\$(aws iam get-role --role-name AmazonEKS_EBS_CSI_DriverRole | jq .Role.Arn | tr -d '"')
             eksctl create addon --name aws-ebs-csi-driver --cluster wickr-ha --region \$REGION --service-account-role-arn \$CSIROLE --force
             echo -e "...done!"
@@ -451,7 +457,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
             Action: "*"
             Resource: "*"
   secretsManagerKeyAlias:
@@ -472,7 +478,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
             Action: "*"
             Resource: "*"
   rdsAlias:
@@ -580,7 +586,12 @@ Resources:
     Properties:
       Name: wickr-ha
       RoleArn: !GetAtt EKSClusterRole.Arn
-      Version: 1.23
+      Version: 1.26
+      EncryptionConfig:
+        - Provider:
+            KeyArn: !GetAtt EksKmsKey.Arn
+          Resources:
+            - secrets
       ResourcesVpcConfig:
         SubnetIds:
           - !Ref "PrivateSubnet1"
@@ -700,7 +711,41 @@ Resources:
               Service: eks.amazonaws.com
             Action: "sts:AssumeRole"
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSClusterPolicy"
+      Policies:
+        - PolicyName: kmsSecret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:Encrypt"
+                  - "kms:Decrypt"
+                  - "kms:ListGrants"
+                  - "kms:DescribeKey"
+                Resource: 
+                  - !GetAtt EksKmsKey.Arn
+
+  EksKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Enabled: true
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "*"
+            Resource: "*"
+  EksKmsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/eksSecret
+      TargetKeyId:
+        Ref: EksKmsKey
 
   EKSNodeRole:
     Type: "AWS::IAM::Role"
@@ -714,10 +759,10 @@ Resources:
               Service: ec2.amazonaws.com
             Action: "sts:AssumeRole"
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-        - "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-        - "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-        - "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonEKS_CNI_Policy"
       Policies:
         - PolicyName: s3Policy
           PolicyDocument:
@@ -743,7 +788,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
             Action: "sts:AssumeRole"
       Policies:
         - PolicyName: EKSAdminPolicy
