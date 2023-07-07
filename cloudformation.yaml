@@ -334,9 +334,9 @@ Resources:
             echo
             echo
             read -p "What region is your cluster deployed to? i.e us-east-1: " REGION
-            if [[ $REGION == us-gov-* ]]
+            if [[ \$REGION == us-gov-* ]]
               then
-                PARTITION=$REGION
+                PARTITION=\$REGION
               else
                 PARTITION=aws
             fi
