@@ -15,6 +15,10 @@ This template and associated instructions will build a Wickr Enterprise High-Ava
 - An Amazon Relational Database Service (Amazon RDS) running Amazon Aurora for MySQL, encrypted with an AWS Key Management Service (KMS) Customer Managed Key (CMK)
 - Amazon Aurora for MySQL admin user credential dynamically provisioned and stored in AWS Secrets Manager, secured with an AWS KMS CMK
 
+## Limitations
+
+This code has not been tested for deployment into the AWS GovCloud (US) regions.
+
 ## Requirements
 
 - An existing Amazon EC2 KeyPair uploaded or created in your AWS Account. Instructions can be found [here.](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html)
