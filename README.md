@@ -5,7 +5,7 @@
 
 ## Overview
 
-This template and associated instructions will build a Wickr Enterprise High-Availability deployment across three Availability Zones and is designed to be as automated as possible. The deployment will take ~15mins and includes the following resources:
+This template and associated instructions will build a Wickr Enterprise High-Availability deployment across three Availability Zones and is designed to be as automated as possible. The deployment will take ~30mins and includes the following resources:
 
 - 1 x Amazon Virtual Private Cloud (Amazon VPC)
 - 3 x Public and 3 x Private Subnets, with 3 x NAT Gateways spanning 3 Availability Zones in the given region
